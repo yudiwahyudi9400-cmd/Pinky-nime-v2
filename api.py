@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 import subprocess
 import re
+import sys
 
 app = FastAPI()
 
@@ -11,22 +12,23 @@ def home():
 @app.get("/get_video")
 def get_video(title: str, is_series: str = "false", season: int = 1, episode: int = 1):
     try:
-        # Menggunakan V3 (API Aplikasi Android) untuk Full Movie
-        if is_series.lower() == "true":
-            # Command untuk TV Series
-            cmd = f'moviebox v3 download-series "{title}" -s {season} -e {episode} --test --verbose'
-        else:
-            # Command untuk Film
-            cmd = f'moviebox v3 download-movie "{title}" --test --verbose'
+        # Gunakan path Python asli milik Vercel agar perintah dikenali
+        python_bin = sys.executable
         
-        # Jalankan mesin CLI Simatwa secara virtual di Vercel
-        process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # Tambahkan --yes agar mesin tidak nyangkut meminta konfirmasi
+        if is_series.lower() == "true":
+            cmd = [python_bin, "-m", "moviebox_api", "v3", "download-series", title, "-s", str(season), "-e", str(episode), "--test", "--verbose", "--yes"]
+        else:
+            cmd = [python_bin, "-m", "moviebox_api", "v3", "download-movie", title, "--test", "--verbose", "--yes"]
+        
+        # Jalankan mesin CLI tanpa shell=True agar lebih stabil di Vercel
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         out, err = process.communicate()
         
-        # Output terminal digabungkan
-        full_log = out + "\n" + err
+        # Gabungkan semua output terminal
+        full_log = (out or "") + "\n" + (err or "")
         
-        # Radar Regex untuk menangkap link m3u8 atau mp4 dari log Vercel
+        # Radar Regex yang lebih ganas untuk menangkap link m3u8 atau mp4
         stream_url = ""
         match = re.search(r'(https?://[^\s"\'\[\]]+\.(?:m3u8|mp4)[^\s"\'\[\]]*)', full_log)
         
@@ -37,7 +39,8 @@ def get_video(title: str, is_series: str = "false", season: int = 1, episode: in
             "status": "success",
             "title": title,
             "stream_url": stream_url,
-            "debug_log": full_log # Munculkan log kalau gagal untuk kita pantau
+            # Jika berhasil, jangan tampilkan log kotor. Jika gagal, tampilkan log-nya.
+            "debug_log": full_log if not stream_url else "Video berhasil diekstrak!"
         }
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": "Crash: " + str(e), "debug_log": str(e)}
